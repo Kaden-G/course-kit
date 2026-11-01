@@ -1,5 +1,6 @@
 {% extends "base.html" %}{% block title %}Settings{% endblock %}{% block body %}
 <h1>Settings</h1>
+<p class="muted">This Course Kit runs from <code>{{ root }}</code>{% if not config_exists %} <strong style="color:var(--bad)">but no config.yaml is there. If the folder was moved, close the Terminal window and open Course Kit.command from its new location.</strong>{% endif %}</p>
 {% if request.query_params.get('saved') %}<div class="notice ok">Saved.{% if request.query_params.get('test') %} Testing the connection below.{% endif %}</div>{% endif %}
 <form method="post" action="/settings">
 <div class="grid">

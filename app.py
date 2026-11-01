@@ -516,7 +516,8 @@ def settings(request: Request):
     authors = sorted({p["author"] for r in index_by_cmid(man).values() if r.get("type") == "forum"
                       for p in parse_forum_posts(read_md(cfg, r.get("md"))) if p["author"]})
     return templates.TemplateResponse(request, "settings.html", {
-        "cfg": cfg, "model": model, "presets": llm.PRESETS, "resolved": llm.resolve(model),
+        "cfg": cfg, "model": model, "presets": llm.PRESETS, "resolved": llm.resolve(model), "root": str(ROOT),
+        "config_exists": CONFIG.exists(),
         "authors": authors, "own_count": len(own_posts(cfg, man, limit=99)),
         "about": profile_text("about"), "voice": profile_text("voice"), "rubric": profile_text("rubric")})
 
@@ -562,10 +563,21 @@ def test_model():
 
 
 def main():
+    import socket
     import uvicorn
     port = 8765
+    url = f"http://127.0.0.1:{port}"
+    if not ROOT.joinpath("config.yaml").exists():
+        print(f"WARNING: no config.yaml in {ROOT}. Was the folder moved while Course Kit was running?")
+    with socket.socket() as sck:
+        if sck.connect_ex(("127.0.0.1", port)) == 0:
+            print(f"Course Kit is already running (probably in another Terminal window). Opening {url}.")
+            print("Close the other window first if you want to restart it from this folder.")
+            webbrowser.open(url)
+            return
+    print(f"Course Kit folder: {ROOT}")
     if "--no-browser" not in sys.argv:
-        threading.Timer(1.2, lambda: webbrowser.open(f"http://127.0.0.1:{port}")).start()
+        threading.Timer(1.2, lambda: webbrowser.open(url)).start()
     uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
 
 
