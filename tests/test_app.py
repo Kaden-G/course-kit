@@ -167,3 +167,14 @@ def test_old_config_gets_new_defaults(tmp_path, monkeypatch):
     cfg = appmod.load_cfg()
     assert cfg["course_url"] == "https://x/mine" and cfg["model"]["api_key"] == "k"     # his values win
     assert cfg["update"]["repo"] == "Kaden-G/course-kit"                                # new setting filled in
+
+
+def test_error_page_and_bad_manifest(kit, monkeypatch):
+    c, root, _ = kit
+    (root / "course" / "manifest.json").write_text("{not json")
+    r = c.get("/"); assert r.status_code == 200 and "manifest.json could not be read" in r.text
+    def boom(*a, **k): raise RuntimeError("kaboom")
+    monkeypatch.setattr(appmod, "list_drafts", boom)
+    c2 = TestClient(appmod.app, raise_server_exceptions=False)
+    r = c2.get("/"); assert r.status_code == 500 and "kaboom" in r.text and "screenshot" in r.text
+    assert llm.resolve(None)["provider"] == "gemini"

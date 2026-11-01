@@ -40,6 +40,20 @@ def kit_version() -> str:
     return p.read_text().strip() if p.exists() else "0"
 app = FastAPI()
 
+
+@app.exception_handler(Exception)
+async def show_error(request: Request, exc: Exception):
+    import traceback, html as _h
+    tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    body = (f"<!doctype html><meta charset='utf-8'><body style='font-family:-apple-system,sans-serif;padding:2rem;max-width:900px'>"
+            f"<h2>Course Kit hit an error</h2><p>Send Kaden a screenshot of this page.</p>"
+            f"<p><b>Version</b> {kit_version()} · <b>Folder</b> <code>{_h.escape(str(ROOT))}</code> · <b>Page</b> <code>{_h.escape(str(request.url.path))}</code></p>"
+            f"<p><b>{_h.escape(type(exc).__name__)}</b>: {_h.escape(str(exc))}</p>"
+            f"<pre style='background:#111;color:#eee;padding:12px;border-radius:8px;white-space:pre-wrap;font-size:12px'>{_h.escape(tb)}</pre>"
+            f"<p><a href='/'>Back to the dashboard</a></p></body>")
+    print(tb, file=sys.stderr)
+    return HTMLResponse(body, status_code=500)
+
 LIMITS = {"readings": 90_000, "forum": 40_000, "module": 12_000, "quiz": 6_000, "wargame": 30_000,
           "classmate": 8_000, "rubric": 8_000, "about": 3_000, "voice": 12_000}
 CHIPS = [
@@ -101,7 +115,14 @@ def load_manifest(cfg: dict) -> dict:
     p = course_dir(cfg) / "manifest.json"
     if not p.exists():
         return {"sections": []}
-    return json.loads(p.read_text(encoding="utf-8"))
+    try:
+        man = json.loads(p.read_text(encoding="utf-8"))
+    except Exception as e:
+        return {"sections": [], "error": f"manifest.json could not be read ({e.__class__.__name__}); run a fetch again."}
+    man.setdefault("sections", [])
+    for sec in man["sections"]:
+        sec.setdefault("modules", []); sec.setdefault("files", []); sec.setdefault("name", f"Section {sec.get('number')}")
+    return man
 
 
 def walk(recs: list[dict]):

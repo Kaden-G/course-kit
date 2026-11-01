@@ -1,4 +1,5 @@
 {% extends "base.html" %}{% block body %}
+{% if man.error %}<div class="notice warn">{{ man.error }}</div>{% endif %}
 {% if not has_key %}<div class="notice warn">No AI key yet. Drafting is off until you <a href="/settings">add one in Settings</a>. Fetching works without it.</div>{% endif %}
 <div class="grid">
 <div class="card">

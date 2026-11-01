@@ -21,8 +21,9 @@ class LLMError(Exception):
     pass
 
 
-def resolve(model_cfg: dict) -> dict:
-    provider = (model_cfg or {}).get("provider", "gemini")
+def resolve(model_cfg: dict | None) -> dict:
+    model_cfg = model_cfg or {}
+    provider = model_cfg.get("provider") or "gemini"
     preset = PRESETS.get(provider, PRESETS["custom"])
     return {
         "provider": provider,
