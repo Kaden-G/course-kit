@@ -1,27 +1,47 @@
 name: release
+# A push to main that changes VERSION builds course-kit.zip and publishes release v<VERSION>.
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
+    paths: [VERSION]
+  workflow_dispatch:
 permissions:
   contents: write
 jobs:
   release:
     runs-on: ubuntu-latest
+    env: { GH_TOKEN: "${{ github.token }}" }
     steps:
       - uses: actions/checkout@v4
+      - name: Read version
+        id: v
+        run: |
+          echo "tag=v$(tr -d '[:space:]' < VERSION)" >> "$GITHUB_OUTPUT"
+      - name: Skip if released
+        id: skip
+        run: |
+          if gh release view "${{ steps.v.outputs.tag }}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"; echo "Release ${{ steps.v.outputs.tag }} already exists; nothing to do."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/setup-python@v5
+        if: steps.skip.outputs.exists == 'false'
         with: { python-version: "3.12" }
       - name: Install and test
+        if: steps.skip.outputs.exists == 'false'
         run: |
           pip install -r requirements.txt pytest fastapi uvicorn jinja2 python-multipart httpx
           python -m playwright install --with-deps chromium
           python -m pytest -q tests
       - name: Build zip
+        if: steps.skip.outputs.exists == 'false'
         run: |
-          echo "${GITHUB_REF_NAME#v}" > VERSION
           mkdir -p dist
           zip -qr dist/course-kit.zip . -x 'dist/*' '.git/*' '.github/*' '*/__pycache__/*' '.pytest_cache/*' 'course/*' 'drafts/*' '.browser-profile/*'
       - name: Publish release
-        env: { GH_TOKEN: "${{ github.token }}" }
+        if: steps.skip.outputs.exists == 'false'
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/course-kit.zip --title "Course Kit $GITHUB_REF_NAME" --notes "${NOTES:-Course Kit $GITHUB_REF_NAME}" --repo "$GITHUB_REPOSITORY"
+          notes="$(git log -1 --pretty=%B)"
+          gh release create "${{ steps.v.outputs.tag }}" dist/course-kit.zip --target "$GITHUB_SHA" \
+            --title "Course Kit ${{ steps.v.outputs.tag }}" --notes "$notes" --repo "$GITHUB_REPOSITORY"
