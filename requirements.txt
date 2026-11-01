@@ -1,0 +1,5 @@
+playwright==1.63.0
+beautifulsoup4
+markdownify
+pyyaml
+openpyxl

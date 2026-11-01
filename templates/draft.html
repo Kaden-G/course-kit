@@ -1,0 +1,32 @@
+{% extends "base.html" %}{% block title %}{{ d.title }}{% endblock %}{% block body %}
+<p class="muted"><a href="/">Course</a> › <a href="/module/{{ d.section }}/{{ d.cmid }}">{{ d.module[:60] }}</a></p>
+<h1>{{ d.title }}{% if d.classmate %} <span class="muted">to {{ d.classmate }}</span>{% endif %} <span class="tag {{ 'ok' if d.status == 'approved' else '' }}">{{ d.status }}</span></h1>
+{% if d.outbox %}<div class="notice ok">Approved and saved to <code>course/{{ d.outbox }}</code>. Use Copy, then paste into Moodle.</div>{% endif %}
+<div class="card">
+  <form method="post" action="/draft/{{ d.id }}/adjust" id="f" data-busy>
+    <textarea name="text" class="draft" id="text">{{ latest.text }}</textarea>
+    <p class="muted" style="margin:6px 0 10px">Version {{ d.versions|length }} · {{ latest.note }} · {{ latest.ts }} · <span id="count"></span></p>
+    <div class="row" style="margin-bottom:10px">
+      {% for key, label, _ in chips %}<button type="submit" name="chip" value="{{ key }}" class="chip">{{ label }}</button>{% endfor %}
+    </div>
+    <div class="row">
+      <input type="text" name="instruction" placeholder="Or tell it what to change: 'make paragraph two about logistics', 'drop the last sentence'..." style="flex:1;min-width:260px">
+      <button type="submit" class="ghost">Apply</button><span class="spinner">Working...</span>
+    </div>
+  </form>
+  <div class="row" style="margin-top:16px;border-top:1px solid var(--line);padding-top:14px">
+    <button type="button" id="copy">Copy to clipboard</button>
+    <button type="button" class="ghost" id="approve">Approve and save</button>
+    <span class="muted" id="copied"></span>
+  </div>
+  <form method="post" action="/draft/{{ d.id }}/approve" id="approveForm" style="display:none"><input type="hidden" name="text" id="approveText"></form>
+</div>
+{% if d.versions|length > 1 %}<div class="card"><h2>Earlier versions</h2><ul class="plain">
+{% for v in d.versions[:-1] %}<li><form method="post" action="/draft/{{ d.id }}/revert" class="row"><input type="hidden" name="version" value="{{ loop.index0 }}"><span>v{{ loop.index }} · {{ v.note }} · {{ v.ts }}</span><button type="submit" class="chip">Restore</button></form>
+<details><summary class="muted">show</summary><div style="white-space:pre-wrap;padding:8px 0">{{ v.text }}</div></details></li>{% endfor %}</ul></div>{% endif %}
+{% endblock %}{% block script %}<script>
+const ta=document.getElementById('text'),cnt=document.getElementById('count');
+function count(){cnt.textContent=ta.value.trim().split(/\s+/).filter(Boolean).length+' words'}count();ta.addEventListener('input',count);
+document.getElementById('copy').onclick=async()=>{await navigator.clipboard.writeText(ta.value);document.getElementById('copied').textContent='Copied.'};
+document.getElementById('approve').onclick=()=>{document.getElementById('approveText').value=ta.value;document.getElementById('approveForm').submit()};
+</script>{% endblock %}

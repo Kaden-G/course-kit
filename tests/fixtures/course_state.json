@@ -1,0 +1,12 @@
+{"course": {"id": 43, "numsections": 9, "sectionlist": ["1003", "1004", "1007"]},
+ "section": [
+  {"id": "1004", "section": 4, "number": 4, "title": "Week 4: Fires", "cmlist": ["7401", "7402"]},
+  {"id": "1003", "section": 3, "number": 3, "title": "Week 3: Maneuver", "cmlist": ["7301", "7302"]},
+  {"id": "1007", "section": 7, "number": 7, "title": "Week 7: Logistics", "cmlist": ["703", "706"]}],
+ "cm": [
+  {"id": "7401", "name": "Week 4 Overview", "module": "page", "url": "https://elearning.example/mod/page/view.php?id=7401", "sectionid": "1004"},
+  {"id": "7402", "name": "Module 2", "module": "page", "url": "https://elearning.example/mod/page/view.php?id=7402", "sectionid": "1004"},
+  {"id": "7301", "name": "Week 3 Reading", "module": "resource", "url": "https://elearning.example/mod/resource/view.php?id=7301"},
+  {"id": "7302", "name": "Week 3 Discussion", "module": "forum", "url": "https://elearning.example/mod/forum/view.php?id=7302"},
+  {"id": "703", "name": "Week 7 Discussion", "module": "forum", "url": "https://elearning.example/mod/forum/view.php?id=703"},
+  {"id": "706", "name": "A label", "module": "label", "url": null}]}

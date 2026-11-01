@@ -1,0 +1,7 @@
+.browser-profile/
+course/
+drafts/
+dist/
+__pycache__/
+.pytest_cache/
+server.log

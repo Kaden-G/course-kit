@@ -1,0 +1,58 @@
+{% extends "base.html" %}{% block body %}
+{% if not has_key %}<div class="notice warn">No AI key yet. Drafting is off until you <a href="/settings">add one in Settings</a>. Fetching works without it.</div>{% endif %}
+<div class="grid">
+<div class="card">
+  <h2>Fetch from Moodle</h2>
+  <p class="muted">Opens Chrome, you log in, it pulls the section into the course folder. Leave blank for the whole course.</p>
+  <form method="post" action="/fetch" class="row">
+    <input type="text" name="section" placeholder="Section number, e.g. 7" style="max-width:220px" {% if fetch_running %}disabled{% endif %}>
+    <button type="submit" {% if fetch_running %}disabled{% endif %}>{{ 'Fetching...' if fetch_running else 'Fetch' }}</button>
+  </form>
+  {% if ann.forum %}<form method="post" action="/fetch" class="row" style="margin-top:10px"><input type="hidden" name="section" value="{{ ann.section }}">
+    <button type="submit" class="ghost" {% if fetch_running %}disabled{% endif %}>Refresh Announcements</button>
+    <span class="muted">{% if ann.baseline %}baseline on file: {{ ann.baseline.name }}{% else %}no spreadsheet attached yet{% endif %}</span></form>{% endif %}
+  <pre class="log" id="log" style="margin-top:12px;{% if not fetch_running %}display:none{% endif %}"></pre>
+</div>
+<div class="card">
+  <h2>Recent drafts</h2>
+  {% if drafts %}<ul class="plain">{% for d in drafts %}<li><a href="/draft/{{ d.id }}">{{ d.title }}</a>{% if d.classmate %} to {{ d.classmate }}{% endif %}
+    <span class="tag {{ 'ok' if d.status == 'approved' else '' }}">{{ d.status }}</span><br><span class="muted">{{ d.module[:70] }} · {{ d.updated }}</span></li>{% endfor %}</ul>
+  {% else %}<p class="muted">Nothing yet. Open a module below and pick what to draft.</p>{% endif %}
+</div>
+</div>
+<div class="card">
+  <div class="row" style="justify-content:space-between">
+    <span><strong>Course Kit</strong> version {{ version }}{% if not update_cfg.repo %} <span class="muted">· set the update repo in Settings to enable updates</span>{% endif %}</span>
+    {% if update_cfg.repo %}<span class="row"><button type="button" class="ghost" id="chk">Check for updates</button><button type="button" id="upd" style="display:none">Install update</button><span class="muted" id="updmsg"></span></span>{% endif %}
+  </div>
+</div>
+<div class="card">
+  <h2>Course {% if man.course_id %}<span class="tag">id {{ man.course_id }}</span>{% endif %} {% if man.fetched %}<span class="tag">last fetch {{ man.fetched }}</span>{% endif %}</h2>
+  {% if not man.sections %}<p class="muted">Nothing fetched yet. Use the Fetch box above.</p>{% endif %}
+  {% for s in man.sections %}
+    <h3>[{{ '%02d' % s.number }}] {{ s.name }}</h3>
+    <ul class="plain">
+    {% for m in s.modules if m.type == 'page' or m.type == 'forum' or m.type == 'quiz' or m.type == 'book' or m.type == 'assign' %}
+      <li><a href="/module/{{ s.number }}/{{ m.cmid }}">{{ m.name }}</a><span class="tag">{{ m.type }}</span>
+      {% if m.children %}<span class="muted"> · {{ m.children|length }} linked items</span>{% endif %}</li>
+    {% endfor %}
+    {% for f in s.files %}<li class="muted">file: {{ f.split('/')[-1] }}</li>{% endfor %}
+    </ul>
+  {% endfor %}
+</div>
+{% endblock %}{% block script %}<script>
+const log=document.getElementById('log');
+async function poll(){const r=await fetch('/fetch/log');const j=await r.json();
+ if(j.lines.length){log.style.display='block';log.textContent=j.lines.join('\n');log.scrollTop=log.scrollHeight}
+ if(j.running){setTimeout(poll,2000)}else if(j.lines.length){setTimeout(()=>location.reload(),1500)}}
+{% if fetch_running %}poll();{% endif %}
+const chk=document.getElementById('chk'),upd=document.getElementById('upd'),msg=document.getElementById('updmsg');
+if(chk){chk.onclick=async()=>{msg.textContent='Checking...';const j=await (await fetch('/update/check')).json();
+  if(!j.ok){msg.textContent=j.error;return}
+  if(j.available){msg.textContent='Version '+j.latest+' is available (you have '+j.current+').';upd.style.display='inline-block'}
+  else msg.textContent='You have the latest ('+j.current+').'};
+ upd.onclick=async()=>{upd.disabled=true;msg.textContent='Downloading and installing...';
+  const j=await (await fetch('/update/apply',{method:'POST'})).json();
+  if(!j.ok){msg.textContent=j.error;upd.disabled=false;return}
+  msg.textContent='Updated to '+j.version+'. Restarting...';setTimeout(()=>location.reload(),6000)}}
+</script>{% endblock %}

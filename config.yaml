@@ -1,0 +1,10 @@
+course_url: https://elearning.mcele.usmc.mil/moodle/mod/book/view.php?id=602584&chapterid=176352
+out_dir: ./course
+pace_seconds: 1.5
+browser:
+  channel: chrome
+  profile_dir: ./.browser-profile
+  headless: false
+update:
+  repo: Kaden-G/course-kit
+  token: ''

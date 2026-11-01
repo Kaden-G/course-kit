@@ -1,0 +1,50 @@
+{% extends "base.html" %}{% block title %}Settings{% endblock %}{% block body %}
+<h1>Settings</h1>
+{% if request.query_params.get('saved') %}<div class="notice ok">Saved.</div>{% endif %}
+<form method="post" action="/settings">
+<div class="grid">
+<div class="card">
+  <h2>AI model</h2>
+  <label>Provider</label>
+  <select name="provider" id="provider">{% for k in presets %}<option value="{{ k }}" {% if k == resolved.provider %}selected{% endif %}>{{ k }}</option>{% endfor %}</select>
+  <label>API key <small>{% if model.api_key %}(one is saved; paste to replace){% else %}(get one: <span id="keyurl"></span>){% endif %}</small></label>
+  <input type="password" name="api_key" placeholder="paste key">
+  <label>Model name <small>(blank = the provider's default)</small></label>
+  <input type="text" name="name" value="{{ model.name or '' }}" placeholder="{{ resolved.name }}">
+  <label>Base URL <small>(only for custom / local servers)</small></label>
+  <input type="text" name="base_url" value="{{ model.base_url or '' }}">
+  <div class="row" style="margin-top:12px"><button type="button" class="ghost" id="test">Test connection</button><span class="muted" id="testout"></span></div>
+  <p class="muted" style="margin-top:12px">Keys are stored in <code>config.yaml</code> on this computer only.</p>
+</div>
+<div class="card">
+  <h2>Course and drafts</h2>
+  <label>Course link <small>(any page inside the course)</small></label>
+  <input type="text" name="course_url" value="{{ cfg.course_url or '' }}">
+  <label>Your name as it appears in the forums <small>(your own posts then become the voice samples, and you're left out of the reply list)</small></label>
+  {% if authors %}<select name="student_name"><option value="">— pick —</option>{% for a in authors %}<option value="{{ a }}" {% if a == cfg.student_name %}selected{% endif %}>{{ a }}</option>{% endfor %}</select>
+  {% if cfg.student_name %}<p class="muted" style="margin:4px 0 0">{{ own_count }} of your posts found in the fetched forums.</p>{% endif %}
+  {% else %}<input type="text" name="student_name" value="{{ cfg.student_name or '' }}" placeholder="fetch a section with forums first">{% endif %}
+  <label>Update source <small>(GitHub repo, owner/name)</small></label>
+  <input type="text" name="update_repo" value="{{ (cfg.update or {}).repo or '' }}" placeholder="Kaden-G/course-kit">
+  <label>Update token <small>{% if (cfg.update or {}).token %}(one is saved; paste to replace){% else %}(read-only GitHub token Kaden gives you){% endif %}</small></label>
+  <input type="password" name="update_token" placeholder="github_pat_...">
+  <label>Default post length</label>
+  <input type="text" name="length" value="{{ cfg.length or '250-350 words' }}">
+  <label>About me <small>(rank, billet, experience the posts may draw on)</small></label>
+  <textarea name="about">{{ about }}</textarea>
+</div>
+</div>
+<div class="card">
+  <label>Participation rubric <small>(paste from the course; drafts are written against it)</small></label>
+  <textarea name="rubric">{{ rubric }}</textarea>
+  <label>Voice samples <small>(optional once your name is set above; paste here to override)</small></label>
+  <textarea name="voice" style="min-height:220px">{{ voice }}</textarea>
+  <div class="row" style="margin-top:14px"><button type="submit">Save</button></div>
+</div>
+</form>
+{% endblock %}{% block script %}<script>
+const urls={{ presets|tojson }};const sel=document.getElementById('provider'),ku=document.getElementById('keyurl');
+function ku_(){if(ku){const u=urls[sel.value].key_url;ku.innerHTML=u?('<a href="'+u+'" target="_blank">'+u+'</a>'):'not needed'}}ku_();sel.onchange=ku_;
+document.getElementById('test').onclick=async()=>{const o=document.getElementById('testout');o.textContent='Testing (save first if you changed anything)...';
+ const r=await fetch('/settings/test',{method:'POST'});const j=await r.json();o.textContent=j.ok?('OK: '+j.reply):('Failed: '+j.error)};
+</script>{% endblock %}
