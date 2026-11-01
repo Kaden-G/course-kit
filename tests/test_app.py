@@ -158,3 +158,12 @@ def test_config_created_from_example(tmp_path, monkeypatch):
     monkeypatch.setattr(appmod, "ROOT", tmp_path); monkeypatch.setattr(appmod, "CONFIG", tmp_path / "config.yaml")
     assert appmod.load_cfg()["course_url"].endswith("id=1")
     assert (tmp_path / "config.yaml").exists()
+
+
+def test_old_config_gets_new_defaults(tmp_path, monkeypatch):
+    (tmp_path / "config.example.yaml").write_text("course_url: https://x/c\nupdate:\n  repo: Kaden-G/course-kit\n  token: ''\n")
+    (tmp_path / "config.yaml").write_text("course_url: https://x/mine\nmodel:\n  api_key: k\n")   # written by an older build
+    monkeypatch.setattr(appmod, "ROOT", tmp_path); monkeypatch.setattr(appmod, "CONFIG", tmp_path / "config.yaml")
+    cfg = appmod.load_cfg()
+    assert cfg["course_url"] == "https://x/mine" and cfg["model"]["api_key"] == "k"     # his values win
+    assert cfg["update"]["repo"] == "Kaden-G/course-kit"                                # new setting filled in

@@ -65,7 +65,22 @@ def ensure_config():
 
 def load_cfg() -> dict:
     ensure_config()
-    return yaml.safe_load(CONFIG.read_text()) if CONFIG.exists() else {}
+    cfg = (yaml.safe_load(CONFIG.read_text()) if CONFIG.exists() else {}) or {}
+    # settings added in later versions fall back to the example config, so an older config.yaml still works
+    example = ROOT / "config.example.yaml"
+    if example.exists():
+        try:
+            defaults = yaml.safe_load(example.read_text()) or {}
+        except Exception:
+            defaults = {}
+        for key, val in defaults.items():
+            if key not in cfg or cfg[key] in (None, ""):
+                cfg[key] = val
+            elif isinstance(val, dict) and isinstance(cfg[key], dict):
+                for k2, v2 in val.items():
+                    if k2 not in cfg[key] or cfg[key][k2] in (None, ""):
+                        cfg[key][k2] = v2
+    return cfg
 
 
 def save_cfg(cfg: dict):
