@@ -1,6 +1,6 @@
 {% extends "base.html" %}{% block title %}Settings{% endblock %}{% block body %}
 <h1>Settings</h1>
-{% if request.query_params.get('saved') %}<div class="notice ok">Saved.</div>{% endif %}
+{% if request.query_params.get('saved') %}<div class="notice ok">Saved.{% if request.query_params.get('test') %} Testing the connection below.{% endif %}</div>{% endif %}
 <form method="post" action="/settings">
 <div class="grid">
 <div class="card">
@@ -13,7 +13,7 @@
   <input type="text" name="name" value="{{ model.name or '' }}" placeholder="{{ resolved.name }}">
   <label>Base URL <small>(only for custom / local servers)</small></label>
   <input type="text" name="base_url" value="{{ model.base_url or '' }}">
-  <div class="row" style="margin-top:12px"><button type="button" class="ghost" id="test">Test connection</button><span class="muted" id="testout"></span></div>
+  <div class="row" style="margin-top:12px"><button type="submit" name="then_test" value="1" class="ghost">Save and test connection</button><span class="muted" id="testout"></span></div>
   <p class="muted" style="margin-top:12px">Keys are stored in <code>config.yaml</code> on this computer only.</p>
 </div>
 <div class="card">
@@ -45,6 +45,7 @@
 {% endblock %}{% block script %}<script>
 const urls={{ presets|tojson }};const sel=document.getElementById('provider'),ku=document.getElementById('keyurl');
 function ku_(){if(ku){const u=urls[sel.value].key_url;ku.innerHTML=u?('<a href="'+u+'" target="_blank">'+u+'</a>'):'not needed'}}ku_();sel.onchange=ku_;
-document.getElementById('test').onclick=async()=>{const o=document.getElementById('testout');o.textContent='Testing (save first if you changed anything)...';
- const r=await fetch('/settings/test',{method:'POST'});const j=await r.json();o.textContent=j.ok?('OK: '+j.reply):('Failed: '+j.error)};
+async function runTest(){const o=document.getElementById('testout');o.textContent='Saved. Testing the connection...';
+ const r=await fetch('/settings/test',{method:'POST'});const j=await r.json();o.textContent=j.ok?('Connected. The model replied: '+j.reply):('Failed: '+j.error)}
+if(new URLSearchParams(location.search).get('test')==='1'){runTest()}
 </script>{% endblock %}

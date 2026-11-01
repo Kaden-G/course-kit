@@ -141,3 +141,13 @@ def test_llm_resolve_presets():
     assert m["base_url"].endswith("/openai/") and m["name"] == "gemini-2.5-flash"
     m = llm.resolve({"provider": "custom", "base_url": "http://localhost:1234/v1", "name": "foo"})
     assert m["base_url"] == "http://localhost:1234/v1/" and m["name"] == "foo"
+
+
+def test_save_and_test_flow(kit):
+    c, root, _ = kit
+    r = c.post("/settings", data={"provider": "gemini", "api_key": "NEWKEY", "name": "", "base_url": "", "length": "",
+                                  "course_url": "", "student_name": "", "about": "", "voice": "", "rubric": "", "then_test": "1"}, follow_redirects=False)
+    assert r.headers["location"] == "/settings?saved=1&test=1"
+    assert appmod.load_cfg()["model"]["api_key"] == "NEWKEY"
+    r = c.post("/settings/test"); assert r.json()["ok"] is True
+    r = c.get("/"); assert "No AI key yet" not in r.text

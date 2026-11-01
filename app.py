@@ -525,7 +525,7 @@ def settings(request: Request):
 def save_settings(provider: str = Form("gemini"), api_key: str = Form(""), name: str = Form(""), base_url: str = Form(""),
                   length: str = Form("250-350 words"), course_url: str = Form(""), student_name: str = Form(""),
                   update_repo: str = Form(""), update_token: str = Form(""),
-                  about: str = Form(""), voice: str = Form(""), rubric: str = Form("")):
+                  about: str = Form(""), voice: str = Form(""), rubric: str = Form(""), then_test: str = Form("")):
     cfg = load_cfg()
     m = cfg.get("model", {}) or {}
     m["provider"] = provider
@@ -548,7 +548,7 @@ def save_settings(provider: str = Form("gemini"), api_key: str = Form(""), name:
     PROFILE.mkdir(exist_ok=True)
     for k, v in (("about", about), ("voice", voice), ("rubric", rubric)):
         (PROFILE / f"{k}.md").write_text(v, encoding="utf-8")
-    return RedirectResponse("/settings?saved=1", status_code=303)
+    return RedirectResponse("/settings?saved=1" + ("&test=1" if then_test else ""), status_code=303)
 
 
 @app.post("/settings/test")

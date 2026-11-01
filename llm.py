@@ -35,7 +35,7 @@ def resolve(model_cfg: dict) -> dict:
 def chat(model_cfg: dict, system: str, user: str, temperature: float = 0.7, timeout: int = 180) -> str:
     m = resolve(model_cfg)
     if not m["api_key"] and m["provider"] != "custom":
-        raise LLMError("No API key set. Open Settings and paste one.")
+        raise LLMError("No API key saved yet. In Settings, paste the key and click Save at the bottom.")
     body = {"model": m["name"], "temperature": temperature,
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
     req = urllib.request.Request(m["base_url"] + "chat/completions", data=json.dumps(body).encode(),
