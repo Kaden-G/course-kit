@@ -531,6 +531,18 @@ def draft_text(did: str):
     return load_draft(did)["versions"][-1]["text"]
 
 
+@app.get("/__kit")
+def kit_info():
+    return JSONResponse({"root": str(ROOT), "version": kit_version()})
+
+
+@app.post("/__quit")
+def kit_quit():
+    """Lets a newer launch replace a stale copy (one left running after the folder was moved or updated)."""
+    threading.Timer(0.3, lambda: os._exit(0)).start()
+    return JSONResponse({"ok": True})
+
+
 @app.get("/update/check")
 def update_check():
     cfg = load_cfg()
@@ -615,11 +627,32 @@ def main():
     ensure_config()
     if not CONFIG.exists():
         print(f"WARNING: no config.yaml in {ROOT}. Was the folder moved while Course Kit was running?")
+    import urllib.request
     with socket.socket() as sck:
-        if sck.connect_ex(("127.0.0.1", port)) == 0:
-            print(f"Course Kit is already running (probably in another Terminal window). Opening {url}.")
-            print("Close the other window first if you want to restart it from this folder.")
+        port_busy = sck.connect_ex(("127.0.0.1", port)) == 0
+    if port_busy:
+        other = None
+        try:
+            with urllib.request.urlopen(f"{url}/__kit", timeout=3) as r:
+                other = json.loads(r.read())
+        except Exception:
+            pass
+        if other and other.get("root") == str(ROOT):
+            print(f"Course Kit is already running from this folder. Opening {url}.")
             webbrowser.open(url)
+            return
+        print(f"Another Course Kit is running from {other.get('root') if other else 'an older build or a moved folder'}; stopping it.")
+        try:
+            urllib.request.urlopen(urllib.request.Request(f"{url}/__quit", method="POST"), timeout=3)
+        except Exception:
+            pass
+        for _ in range(40):
+            time.sleep(0.25)
+            with socket.socket() as sck:
+                if sck.connect_ex(("127.0.0.1", port)) != 0:
+                    break
+        else:
+            print("Could not stop it. Quit Terminal completely (Cmd+Q, then Terminate) and run Course Kit again.")
             return
     print(f"Course Kit folder: {ROOT}")
     if "--no-browser" not in sys.argv:

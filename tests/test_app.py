@@ -178,3 +178,9 @@ def test_error_page_and_bad_manifest(kit, monkeypatch):
     c2 = TestClient(appmod.app, raise_server_exceptions=False)
     r = c2.get("/"); assert r.status_code == 500 and "kaboom" in r.text and "screenshot" in r.text
     assert llm.resolve(None)["provider"] == "gemini"
+
+
+def test_kit_info_endpoint(kit):
+    c, root, _ = kit
+    j = c.get("/__kit").json()
+    assert j["root"] == str(root) and j["version"] == appmod.kit_version()
