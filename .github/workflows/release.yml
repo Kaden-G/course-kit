@@ -1,9 +1,8 @@
 name: release
-# A push to main that changes VERSION builds course-kit.zip and publishes release v<VERSION>.
+# Every push to main: if release v<VERSION> does not exist yet, build course-kit.zip and publish it.
 on:
   push:
     branches: [main]
-    paths: [VERSION]
   workflow_dispatch:
 permissions:
   contents: write
