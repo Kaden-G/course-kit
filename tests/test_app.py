@@ -151,3 +151,10 @@ def test_save_and_test_flow(kit):
     assert appmod.load_cfg()["model"]["api_key"] == "NEWKEY"
     r = c.post("/settings/test"); assert r.json()["ok"] is True
     r = c.get("/"); assert "No AI key yet" not in r.text
+
+
+def test_config_created_from_example(tmp_path, monkeypatch):
+    (tmp_path / "config.example.yaml").write_text("course_url: https://x/moodle/course/view.php?id=1\n")
+    monkeypatch.setattr(appmod, "ROOT", tmp_path); monkeypatch.setattr(appmod, "CONFIG", tmp_path / "config.yaml")
+    assert appmod.load_cfg()["course_url"].endswith("id=1")
+    assert (tmp_path / "config.yaml").exists()

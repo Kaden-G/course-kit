@@ -503,7 +503,10 @@ def main():
     ap.add_argument("--interactive", action="store_true",
                     help="ask for section numbers one after another, keeping the browser (and login) open")
     a = ap.parse_args()
-    cfg = yaml.safe_load(Path(a.config).read_text())
+    cfg_path = Path(a.config)
+    if not cfg_path.exists() and cfg_path.with_name("config.example.yaml").exists():
+        cfg_path.write_text(cfg_path.with_name("config.example.yaml").read_text())
+    cfg = yaml.safe_load(cfg_path.read_text())
     f = Fetcher(cfg, force=a.force)
     with sync_playwright() as pw:
         f.start(pw)

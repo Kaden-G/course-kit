@@ -56,7 +56,7 @@ course/
 The login is remembered in `.browser-profile/` for next time. Treat that folder
 like a password: don't share it, don't back it up anywhere public.
 
-`config.yaml` already points at the course. If the course changes, paste any
+`config.yaml` is created from `config.example.yaml` on first run and already points at the course. If the course changes, paste any
 link from inside the new course into `course_url`; the script works out the rest.
 
 ## Weekly run

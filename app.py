@@ -55,7 +55,16 @@ CHIPS = [
 
 
 # ---------- config / profile ----------
+def ensure_config():
+    """First run: create config.yaml from config.example.yaml. Release zips never include config.yaml,
+    so unzipping a new build over the folder can never wipe the saved key or settings."""
+    example = ROOT / "config.example.yaml"
+    if not CONFIG.exists() and example.exists():
+        CONFIG.write_text(example.read_text())
+
+
 def load_cfg() -> dict:
+    ensure_config()
     return yaml.safe_load(CONFIG.read_text()) if CONFIG.exists() else {}
 
 
@@ -567,7 +576,8 @@ def main():
     import uvicorn
     port = 8765
     url = f"http://127.0.0.1:{port}"
-    if not ROOT.joinpath("config.yaml").exists():
+    ensure_config()
+    if not CONFIG.exists():
         print(f"WARNING: no config.yaml in {ROOT}. Was the folder moved while Course Kit was running?")
     with socket.socket() as sck:
         if sck.connect_ex(("127.0.0.1", port)) == 0:

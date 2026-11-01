@@ -37,7 +37,7 @@ jobs:
         if: steps.skip.outputs.exists == 'false'
         run: |
           mkdir -p dist
-          zip -qr dist/course-kit.zip . -x 'dist/*' '.git/*' '.github/*' '*/__pycache__/*' '.pytest_cache/*' 'course/*' 'drafts/*' '.browser-profile/*'
+          zip -qr dist/course-kit.zip . -x 'dist/*' '.git/*' '.github/*' '*/__pycache__/*' '.pytest_cache/*' 'course/*' 'drafts/*' '.browser-profile/*' 'config.yaml'
       - name: Publish release
         if: steps.skip.outputs.exists == 'false'
         run: |
