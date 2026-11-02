@@ -1,21 +1,26 @@
 {% extends "base.html" %}{% block body %}
 {% if man.error %}<div class="notice warn">{{ man.error }}</div>{% endif %}
+{% if request.query_params.get('err') %}<div class="notice bad">{{ request.query_params.get('err') }}</div>{% endif %}
 {% if not has_key %}<div class="notice warn">No AI key yet. Drafting is off until you <a href="/settings">add one in Settings</a>. Fetching works without it.</div>{% endif %}
+{% if not has_course_url %}<div class="notice warn">No course link yet. <a href="/settings">Paste any link from inside the course in Settings</a> before the first fetch.</div>{% endif %}
 <div class="grid">
 <div class="card">
   <h2>Fetch from Moodle</h2>
   <p class="muted">Opens Chrome, you log in, it pulls the section into the course folder. Leave blank for the whole course.</p>
   <form method="post" action="/fetch" class="row">
-    <input type="text" name="section" placeholder="Section number, e.g. 7" style="max-width:220px" {% if fetch_running %}disabled{% endif %}>
+    <input type="text" name="section" inputmode="numeric" pattern="[0-9]*" placeholder="Section number, e.g. 7" style="max-width:220px" {% if fetch_running %}disabled{% endif %}>
     <button type="submit" {% if fetch_running %}disabled{% endif %}>{{ 'Fetching...' if fetch_running else 'Fetch' }}</button>
   </form>
   {% if ann.forum %}<form method="post" action="/fetch" class="row" style="margin-top:10px"><input type="hidden" name="section" value="{{ ann.section }}">
     <button type="submit" class="ghost" {% if fetch_running %}disabled{% endif %}>Refresh Announcements</button>
     <span class="muted">{% if ann.baseline %}baseline on file: {{ ann.baseline.name }}{% else %}no spreadsheet attached yet{% endif %}</span></form>{% endif %}
   <pre class="log" id="log" style="margin-top:12px;{% if not fetch_running %}display:none{% endif %}"></pre>
+  {% if man.errors %}<details style="margin-top:10px"><summary class="muted">{{ man.errors|length }} item{{ 's' if man.errors|length != 1 }} could not be fetched last time</summary>
+    <ul class="plain" style="font-size:14px">{% for e in man.errors %}<li class="muted">{{ e }}</li>{% endfor %}</ul>
+    <p class="muted" style="font-size:14px">Fetch the section again; if it keeps failing, send Kaden the raw/ file for that item.</p></details>{% endif %}
 </div>
 <div class="card">
-  <h2>Recent drafts</h2>
+  <h2>Recent drafts{% if draft_count > drafts|length %} <a href="/drafts" class="muted" style="font-size:14px;font-weight:400">all {{ draft_count }} ›</a>{% endif %}</h2>
   {% if drafts %}<ul class="plain">{% for d in drafts %}<li><a href="/draft/{{ d.id }}">{{ d.title }}</a>{% if d.classmate %} to {{ d.classmate }}{% endif %}
     <span class="tag {{ 'ok' if d.status == 'approved' else '' }}">{{ d.status }}</span><br><span class="muted">{{ d.module[:70] }} · {{ d.updated }}</span></li>{% endfor %}</ul>
   {% else %}<p class="muted">Nothing yet. Open a module below and pick what to draft.</p>{% endif %}
@@ -33,7 +38,7 @@
   {% for s in man.sections %}
     <h3>[{{ '%02d' % s.number }}] {{ s.name }}</h3>
     <ul class="plain">
-    {% for m in s.modules if m.type == 'page' or m.type == 'forum' or m.type == 'quiz' or m.type == 'book' or m.type == 'assign' %}
+    {% for m in s.modules if m.cmid is not none and m.type in ('page', 'forum', 'quiz', 'book', 'assign') and 'duplicate_of' not in m %}
       <li><a href="/module/{{ s.number }}/{{ m.cmid }}">{{ m.name }}</a><span class="tag">{{ m.type }}</span>
       {% if m.children %}<span class="muted"> · {{ m.children|length }} linked items</span>{% endif %}</li>
     {% endfor %}
@@ -42,18 +47,18 @@
   {% endfor %}
 </div>
 {% endblock %}{% block script %}<script>
-const log=document.getElementById('log');
-async function poll(){const r=await fetch('/fetch/log');const j=await r.json();
+const log=document.getElementById('log');let sawRunning={{ 'true' if fetch_running else 'false' }};
+async function poll(){let j;try{j=await (await fetch('/fetch/log')).json()}catch(e){setTimeout(poll,3000);return}
  if(j.lines.length){log.style.display='block';log.textContent=j.lines.join('\n');log.scrollTop=log.scrollHeight}
- if(j.running){setTimeout(poll,2000)}else if(j.lines.length){setTimeout(()=>location.reload(),1500)}}
-{% if fetch_running %}poll();{% endif %}
+ if(j.running){sawRunning=true;setTimeout(poll,2000)}else if(sawRunning){setTimeout(()=>location.replace('/'),1500)}}
+poll();
 const chk=document.getElementById('chk'),upd=document.getElementById('upd'),msg=document.getElementById('updmsg');
-if(chk){chk.onclick=async()=>{msg.textContent='Checking...';const j=await (await fetch('/update/check')).json();
+if(chk){chk.onclick=async()=>{msg.textContent='Checking...';let j;try{j=await (await fetch('/update/check')).json()}catch(e){msg.textContent='Could not check: '+e;return}
   if(!j.ok){msg.textContent=j.error;return}
   if(j.available){msg.textContent='Version '+j.latest+' is available (you have '+j.current+').';upd.style.display='inline-block'}
   else msg.textContent='You have the latest ('+j.current+').'};
  upd.onclick=async()=>{upd.disabled=true;msg.textContent='Downloading and installing...';
-  const j=await (await fetch('/update/apply',{method:'POST'})).json();
+  let j;try{j=await (await fetch('/update/apply',{method:'POST'})).json()}catch(e){msg.textContent='Update failed: '+e;upd.disabled=false;return}
   if(!j.ok){msg.textContent=j.error;upd.disabled=false;return}
   msg.textContent='Updated to '+j.version+'. Restarting...';setTimeout(()=>location.reload(),6000)}}
 </script>{% endblock %}

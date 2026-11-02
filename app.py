@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -17,9 +18,10 @@ import time
 import uuid
 import webbrowser
 from pathlib import Path
+from urllib.parse import quote, urlparse
 
 import yaml
-from fastapi import FastAPI, Form, Request
+from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, PlainTextResponse
 from fastapi.templating import Jinja2Templates
 
@@ -40,6 +42,35 @@ def kit_version() -> str:
     return p.read_text().strip() if p.exists() else "0"
 app = FastAPI()
 
+PORT = 8765
+LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1", "[::1]"}
+
+
+@app.middleware("http")
+async def local_only(request: Request, call_next):
+    """The dashboard holds an API key and can start a browser, so only pages served from this same local
+    address may talk to it. A web page in another tab cannot post to it (no cross-site form posts), and a
+    DNS-rebinding trick that points some other name at 127.0.0.1 is refused by the Host check."""
+    host = (request.headers.get("host") or "").strip()
+    hostname = host.rsplit(":", 1)[0] if host.count(":") == 1 or host.startswith("[") and "]:" in host else host
+    if hostname.lower() not in LOCAL_HOSTS:
+        return PlainTextResponse(f"Course Kit only answers at http://127.0.0.1:{PORT}", status_code=421)
+    if request.method not in ("GET", "HEAD", "OPTIONS"):
+        origin = request.headers.get("origin")
+        if origin and (urlparse(origin).hostname or "").lower() not in LOCAL_HOSTS:
+            return PlainTextResponse("Refused: request came from another website.", status_code=403)
+        if request.headers.get("sec-fetch-site", "").lower() in ("cross-site", "same-site"):
+            return PlainTextResponse("Refused: request came from another website.", status_code=403)
+    return await call_next(request)
+
+
+@app.exception_handler(HTTPException)
+async def show_http_error(request: Request, exc: HTTPException):
+    import html as _h
+    return HTMLResponse(f"<!doctype html><meta charset='utf-8'><body style='font-family:-apple-system,sans-serif;padding:2rem'>"
+                        f"<h2>{exc.status_code}</h2><p>{_h.escape(str(exc.detail))}</p><p><a href='/'>Back to the dashboard</a></p></body>",
+                        status_code=exc.status_code)
+
 
 @app.exception_handler(Exception)
 async def show_error(request: Request, exc: Exception):
@@ -55,7 +86,8 @@ async def show_error(request: Request, exc: Exception):
     return HTMLResponse(body, status_code=500)
 
 LIMITS = {"readings": 90_000, "forum": 40_000, "module": 12_000, "quiz": 6_000, "wargame": 30_000,
-          "classmate": 8_000, "rubric": 8_000, "about": 3_000, "voice": 12_000}
+          "classmate": 8_000, "rubric": 8_000, "about": 3_000, "voice": 12_000, "announcements": 40_000}
+ADJUST_LIMIT = 50_000   # per slot of source material sent along with a revision request
 CHIPS = [
     ("shorter", "Shorter", "Cut it by about a third. Keep the citations and the main argument."),
     ("longer", "Longer", "Expand by about a third with one more example or supporting point from the readings."),
@@ -159,6 +191,13 @@ def module_bundle(cfg: dict, man: dict, section: int, cmid: int) -> dict | None:
         return None
     mod = idx.get(mod["duplicate_of"], mod) if "duplicate_of" in mod else mod
     bundle = {"section": sec, "module": mod, "readings": [], "forums": [], "quizzes": [], "files": [], "pages": []}
+    # a forum, quiz or book listed directly in the section is its own module page: it is the thing to draft from
+    if mod.get("type") == "forum":
+        bundle["forums"].append(mod)
+    elif mod.get("type") == "quiz":
+        bundle["quizzes"].append(mod)
+    elif mod.get("type") == "book":
+        bundle["readings"].append({"name": mod["name"], "md": mod.get("md"), "cmid": mod.get("cmid"), "chapterid": None})
 
     def resolve(r):
         return idx.get(r["duplicate_of"], r) if "duplicate_of" in r else r
@@ -325,12 +364,27 @@ def build_slots(cfg: dict, bundle: dict, classmate: dict | None = None) -> dict:
     }
 
 
+def norm(text: str) -> str:
+    """Browsers submit textarea content with CRLF line endings; drafts are stored with LF. Compare and save
+    the LF form, or every chip click would look like a hand edit."""
+    return (text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+
+
 def draft_path(did: str) -> Path:
     return DRAFTS / f"{did}.json"
 
 
 def load_draft(did: str) -> dict:
-    return json.loads(draft_path(did).read_text(encoding="utf-8"))
+    """The draft, or a 404 page for an id that is not on disk (an old bookmark, a deleted draft)."""
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", did or "") or not draft_path(did).exists():
+        raise HTTPException(404, "That draft does not exist any more.")
+    try:
+        d = json.loads(draft_path(did).read_text(encoding="utf-8"))
+    except Exception as e:
+        raise HTTPException(500, f"drafts/{did}.json could not be read ({e.__class__.__name__}). Send Kaden that file.")
+    d.setdefault("versions", []) or d["versions"].append({"text": "", "note": "empty", "ts": d.get("updated", "")})
+    d.setdefault("status", "draft"); d.setdefault("updated", d.get("created", "")); d.setdefault("module", "")
+    return d
 
 
 def save_draft(d: dict):
@@ -339,9 +393,35 @@ def save_draft(d: dict):
 
 
 def list_drafts() -> list[dict]:
+    """Every draft, newest first. One unreadable file is skipped (and reported on stderr), not fatal."""
     DRAFTS.mkdir(exist_ok=True)
-    ds = [load_draft(p.stem) for p in DRAFTS.glob("*.json")]
-    return sorted(ds, key=lambda d: d["updated"], reverse=True)
+    ds = []
+    for p in DRAFTS.glob("*.json"):
+        try:
+            ds.append(load_draft(p.stem))
+        except Exception as e:
+            print(f"skipping unreadable draft {p.name}: {e}", file=sys.stderr)
+    return sorted(ds, key=lambda d: d.get("updated", ""), reverse=True)
+
+
+def card_exists(name: str) -> bool:
+    return bool(re.fullmatch(r"[a-z0-9_]+", name or "")) and (PROMPTS / f"{name}.md").exists()
+
+
+def forum_posts(cfg: dict, bundle: dict) -> list[dict]:
+    posts = []
+    for f in bundle["forums"]:
+        posts += parse_forum_posts(read_md(cfg, f.get("md")))
+    return posts
+
+
+def pick_classmate(posts: list[dict], post_index: str = "", author: str = "") -> dict | None:
+    """The post to reply to: by index into the thread when the module page sent one, otherwise the longest
+    post by that author (older links and saved drafts only know the name)."""
+    if post_index.strip().isdigit() and int(post_index) < len(posts):
+        return posts[int(post_index)]
+    mine = [p for p in posts if author and p["author"] == author]
+    return max(mine, key=lambda p: len(p["body"]), default=None)
 
 
 SYSTEM = "You draft course writing for a student who will review and edit it. Return only the requested text, no commentary."
@@ -362,12 +442,35 @@ def new_draft(cfg: dict, card: dict, bundle: dict, classmate: dict | None) -> di
     return d
 
 
+def adjust_context(cfg: dict, d: dict) -> str:
+    """The source material the draft was written from, so a revision ("add a citation") can quote the real
+    readings instead of inventing one. Each recipe card lists what it needs; only those slots are sent."""
+    try:
+        needs = (load_card(d["card"])["meta"] or {}).get("needs") or []
+    except Exception:
+        needs = []
+    if not needs or d.get("cmid") is None:
+        return ""
+    man = load_manifest(cfg)
+    b = module_bundle(cfg, man, d.get("section"), d["cmid"])
+    if not b:
+        return ""
+    cm = pick_classmate(forum_posts(cfg, b), author=d.get("classmate") or "") if d.get("classmate") else None
+    slots = build_slots(cfg, b, cm)
+    if d.get("classmate") and "classmate" not in needs:
+        needs = list(needs) + ["classmate"]
+    parts = [f"=== {n.upper()} ===\n{clip(slots[n], ADJUST_LIMIT)}" for n in needs if slots.get(n)]
+    return "\n\n".join(parts)
+
+
 def adjust_draft(cfg: dict, d: dict, instruction: str, current_text: str) -> dict:
     slots = {"voice": clip(voice_text(cfg, load_manifest(cfg)), LIMITS["voice"]), "rubric": clip(profile_text("rubric"), LIMITS["rubric"])}
+    context = adjust_context(cfg, d)
     prompt = (f"Revise the draft below according to this instruction: {instruction}\n\n"
               f"Keep everything the instruction does not touch. Return only the revised draft.\n\n"
               f"Student's voice samples:\n{slots['voice']}\n\nRubric:\n{slots['rubric']}\n\n"
-              f"DRAFT:\n{current_text}")
+              + (f"Source material the draft was written from. Ground any new claim or citation in this; never invent a source:\n{context}\n\n" if context else "")
+              + f"DRAFT:\n{current_text}")
     text = llm.chat(cfg.get("model", {}), SYSTEM, prompt)
     now = time.strftime("%Y-%m-%d %H:%M")
     d["versions"].append({"text": text, "note": instruction, "ts": now})
@@ -389,19 +492,36 @@ class FetchJob:
     def start(self, section: str | None):
         if self.running():
             return
-        cmd = ["uv", "run", str(ROOT / "fetch_moodle.py")]
+        home = str(Path.home())
+        env = dict(os.environ)
+        env["PATH"] = f"{home}/.local/bin:{home}/.cargo/bin:" + env.get("PATH", "")
+        uv = shutil.which("uv", path=env["PATH"])
+        cmd = [uv, "run", str(ROOT / "fetch_moodle.py")] if uv else [sys.executable, str(ROOT / "fetch_moodle.py")]
         if section:
             cmd += ["--section", str(int(section))]
-        self.lines = [f"$ {' '.join(cmd)}"]
-        self.proc = subprocess.Popen(cmd, cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        threading.Thread(target=self._pump, daemon=True).start()
+        with self.lock:
+            self.lines = [f"$ {' '.join(cmd)}"]
+            if not uv:
+                self.lines.append("(uv is not installed; using the same Python that runs the dashboard)")
+        try:
+            self.proc = subprocess.Popen(cmd, cwd=str(ROOT), env=env, stdin=subprocess.DEVNULL,
+                                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        except OSError as e:
+            with self.lock:
+                self.lines.append(f"[could not start the fetcher: {e}]")
+            self.proc = None
+            return
+        threading.Thread(target=self._pump, args=(self.proc,), daemon=True).start()
 
-    def _pump(self):
-        for line in self.proc.stdout:
+    def _pump(self, proc: subprocess.Popen):
+        for line in proc.stdout:
             with self.lock:
                 self.lines.append(line.rstrip())
+        code = proc.wait()
         with self.lock:
-            self.lines.append(f"[finished with code {self.proc.wait()}]")
+            self.lines.append(f"[finished with code {code}]" if code == 0 else
+                              f"[finished with code {code}. Something went wrong; the lines above say what. "
+                              f"Anything fetched before the error is saved.]")
 
 
 fetch_job = FetchJob()
@@ -414,16 +534,26 @@ def home(request: Request):
     man = load_manifest(cfg)
     model = llm.resolve(cfg.get("model", {}))
     ann = announcements(cfg, man)
+    drafts = list_drafts()
     return templates.TemplateResponse(request, "home.html", {
-        "cfg": cfg, "man": man, "drafts": list_drafts()[:12], "model": model, "ann": ann,
+        "cfg": cfg, "man": man, "drafts": drafts[:12], "draft_count": len(drafts), "model": model, "ann": ann,
         "version": kit_version(), "update_cfg": cfg.get("update", {}) or {},
-        "has_key": bool(model["api_key"]) or model["provider"] == "custom", "fetch_running": fetch_job.running()})
+        "has_key": bool(model["api_key"]) or model["provider"] == "custom", "fetch_running": fetch_job.running(),
+        "has_course_url": bool((cfg.get("course_url") or "").strip())})
 
 
 @app.post("/fetch")
 def fetch(section: str = Form("")):
-    fetch_job.start(section.strip() or None)
+    s = section.strip()
+    if s and not s.isdigit():
+        return RedirectResponse("/?err=" + quote("The section must be a number, like 7. Leave it blank for the whole course."), status_code=303)
+    fetch_job.start(s or None)
     return RedirectResponse("/", status_code=303)
+
+
+@app.get("/drafts", response_class=HTMLResponse)
+def drafts_page(request: Request):
+    return templates.TemplateResponse(request, "drafts.html", {"drafts": list_drafts()})
 
 
 @app.get("/fetch/log")
@@ -439,13 +569,12 @@ def module(request: Request, section: int, cmid: int):
     b = module_bundle(cfg, man, section, cmid)
     if not b:
         return HTMLResponse("Not found", status_code=404)
-    posts = []
-    for f in b["forums"]:
-        posts += parse_forum_posts(read_md(cfg, f.get("md")))
-    prompt_authors = {posts[0]["author"]} if posts else set()
+    posts = forum_posts(cfg, b)
+    prompt_authors = {posts[0]["author"]} if posts else set()   # the instructor opened the thread
     me = (cfg.get("student_name") or "").strip().lower()
-    classmates = [p for p in posts[1:] if p["author"] not in prompt_authors and p["author"].strip().lower() != me]
-    drafts = [d for d in list_drafts() if d["cmid"] == cmid]
+    classmates = [{"idx": i, **p} for i, p in enumerate(posts)
+                  if i > 0 and p["author"] not in prompt_authors and p["author"].strip().lower() != me and p["body"].strip()]
+    drafts = [d for d in list_drafts() if d.get("cmid") == cmid]
     ann = announcements(cfg, man)
     return templates.TemplateResponse(request, "module.html", {
         "cfg": cfg, "b": b, "posts": posts, "classmates": classmates, "cards": list_cards(), "drafts": drafts,
@@ -454,16 +583,17 @@ def module(request: Request, section: int, cmid: int):
 
 
 @app.post("/draft")
-def make_draft(section: int = Form(...), cmid: int = Form(...), card: str = Form(...), classmate: str = Form("")):
+def make_draft(section: int = Form(...), cmid: int = Form(...), card: str = Form(...), classmate: str = Form(""), post: str = Form("")):
     cfg = load_cfg()
     man = load_manifest(cfg)
     b = module_bundle(cfg, man, section, cmid)
-    cm = None
-    if classmate:
-        posts = []
-        for f in b["forums"]:
-            posts += parse_forum_posts(read_md(cfg, f.get("md")))
-        cm = next((p for p in posts if p["author"] == classmate), None)
+    if not b:
+        raise HTTPException(404, "That module is not in the fetched course any more. Fetch the section again.")
+    if not card_exists(card):
+        raise HTTPException(404, f"No recipe card named {card!r} in the prompts folder.")
+    cm = pick_classmate(forum_posts(cfg, b), post, classmate) if (classmate or post) else None
+    if card == "reply" and not cm:
+        raise HTTPException(404, "Pick a classmate's post to reply to.")
     try:
         d = new_draft(cfg, load_card(card), b, cm)
     except llm.LLMError as e:
@@ -481,9 +611,10 @@ def draft(request: Request, did: str):
 def adjust(did: str, instruction: str = Form(""), chip: str = Form(""), text: str = Form("")):
     cfg = load_cfg()
     d = load_draft(did)
-    if text.strip() and text.strip() != d["versions"][-1]["text"].strip():
+    text = norm(text)
+    if text and text != norm(d["versions"][-1]["text"]):
         now = time.strftime("%Y-%m-%d %H:%M")
-        d["versions"].append({"text": text.strip(), "note": "edited by hand", "ts": now})
+        d["versions"].append({"text": text, "note": "edited by hand", "ts": now})
         d["updated"] = now
         save_draft(d)
     instr = next((c[2] for c in CHIPS if c[0] == chip), "") or instruction.strip()
@@ -495,9 +626,18 @@ def adjust(did: str, instruction: str = Form(""), chip: str = Form(""), text: st
     return RedirectResponse(f"/draft/{did}", status_code=303)
 
 
+@app.post("/draft/{did}/delete")
+def delete_draft(did: str):
+    load_draft(did)   # 404 if it is already gone
+    draft_path(did).unlink(missing_ok=True)
+    return RedirectResponse("/drafts", status_code=303)
+
+
 @app.post("/draft/{did}/revert")
 def revert(did: str, version: int = Form(...)):
     d = load_draft(did)
+    if not 0 <= version < len(d["versions"]):
+        raise HTTPException(404, "That version does not exist.")
     v = d["versions"][version]
     now = time.strftime("%Y-%m-%d %H:%M")
     d["versions"].append({"text": v["text"], "note": f"restored version {version + 1}", "ts": now})
@@ -511,13 +651,14 @@ def approve(did: str, text: str = Form(...)):
     cfg = load_cfg()
     d = load_draft(did)
     now = time.strftime("%Y-%m-%d %H:%M")
-    if text.strip() != d["versions"][-1]["text"].strip():
-        d["versions"].append({"text": text.strip(), "note": "final edit", "ts": now})
+    text = norm(text)
+    if text and text != norm(d["versions"][-1]["text"]):
+        d["versions"].append({"text": text, "note": "final edit", "ts": now})
     d["status"] = "approved"
     d["updated"] = now
     save_draft(d)
     sec = next((s for s in load_manifest(cfg)["sections"] if s["number"] == d["section"]), None)
-    outdir = course_dir(cfg) / (sec["dir"] if sec else f"section-{d['section']:02d}") / "outbox"
+    outdir = course_dir(cfg) / ((sec or {}).get("dir") or f"section-{int(d['section'] or 0):02d}") / "outbox"
     outdir.mkdir(parents=True, exist_ok=True)
     fname = f"{d['card']}-{d['cmid']}-{time.strftime('%Y%m%d-%H%M')}.md"
     (outdir / fname).write_text(d["versions"][-1]["text"], encoding="utf-8")
@@ -572,9 +713,11 @@ def settings(request: Request):
     man = load_manifest(cfg)
     authors = sorted({p["author"] for r in index_by_cmid(man).values() if r.get("type") == "forum"
                       for p in parse_forum_posts(read_md(cfg, r.get("md"))) if p["author"]})
+    keys = model.get("keys") if isinstance(model.get("keys"), dict) else {}
+    saved_keys = sorted(k for k, v in keys.items() if v) or ([model.get("provider") or "gemini"] if model.get("api_key") else [])
     return templates.TemplateResponse(request, "settings.html", {
         "cfg": cfg, "model": model, "presets": llm.PRESETS, "resolved": llm.resolve(model), "root": str(ROOT),
-        "config_exists": CONFIG.exists(),
+        "config_exists": CONFIG.exists(), "saved_keys": saved_keys,
         "authors": authors, "own_count": len(own_posts(cfg, man, limit=99)),
         "about": profile_text("about"), "voice": profile_text("voice"), "rubric": profile_text("rubric")})
 
@@ -583,12 +726,22 @@ def settings(request: Request):
 def save_settings(provider: str = Form("gemini"), api_key: str = Form(""), name: str = Form(""), base_url: str = Form(""),
                   length: str = Form("250-350 words"), course_url: str = Form(""), student_name: str = Form(""),
                   update_repo: str = Form(""), update_token: str = Form(""),
-                  about: str = Form(""), voice: str = Form(""), rubric: str = Form(""), then_test: str = Form("")):
+                  about: str = Form(""), voice: str = Form(""), rubric: str = Form(""), then_test: str = Form(""),
+                  clear_key: str = Form("")):
     cfg = load_cfg()
     m = cfg.get("model", {}) or {}
-    m["provider"] = provider
+    if provider not in llm.PRESETS:
+        provider = "custom"
+    keys = m.get("keys") if isinstance(m.get("keys"), dict) else {}
+    if m.get("api_key") and not keys:   # config from an older build: that one key belonged to the provider saved then
+        keys[m.get("provider") or "gemini"] = m["api_key"]
+    if clear_key:
+        keys.pop(provider, None)
     if api_key.strip():
-        m["api_key"] = api_key.strip()
+        keys[provider] = api_key.strip()
+    m["provider"] = provider
+    m["keys"] = keys
+    m["api_key"] = keys.get(provider, "")   # the key in use; kept here too so a config file stays easy to read
     m["name"] = name.strip() or llm.PRESETS.get(provider, {}).get("name", "")
     m["base_url"] = base_url.strip()
     cfg["model"] = m
@@ -613,7 +766,7 @@ def save_settings(provider: str = Form("gemini"), api_key: str = Form(""), name:
 def test_model():
     cfg = load_cfg()
     try:
-        reply = llm.chat(cfg.get("model", {}), "Reply with the single word OK.", "Ping.", temperature=0)
+        reply = llm.chat(cfg.get("model", {}), "Reply with the single word OK.", "Ping.")
         return JSONResponse({"ok": True, "reply": reply[:80]})
     except llm.LLMError as e:
         return JSONResponse({"ok": False, "error": str(e)})
@@ -622,7 +775,7 @@ def test_model():
 def main():
     import socket
     import uvicorn
-    port = 8765
+    port = PORT
     url = f"http://127.0.0.1:{port}"
     ensure_config()
     if not CONFIG.exists():

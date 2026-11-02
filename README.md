@@ -16,9 +16,15 @@ stays on this computer. Nothing is ever posted to Moodle for you: you copy, you 
 4. Click a module. Pick **Discussion post**, **Reply to a classmate**, **Quiz study guide**,
    **Reading analysis** or **Wargame turn**. Twenty to sixty seconds later the draft opens.
 5. Edit in the box, or hit a chip (Shorter, More formal, Add a citation, Sound more like me...),
-   or type an instruction and Apply. Every version is kept; Restore any of them.
+   or type an instruction and Apply. Chips and instructions see the readings and the thread, so
+   "Add a citation" quotes the real material. Every version is kept; Restore any of them.
+   **Save my edits** keeps your own changes as a version without asking the AI.
 6. **Copy to clipboard**, paste into Moodle. **Approve and save** files it under the section's
-   `outbox/` folder.
+   `outbox/` folder. **Drafts** in the top bar lists everything; delete what you no longer need.
+
+Keys are saved one per provider, so you can try Gemini's free tier, switch to another provider,
+and switch back without re-pasting. The dashboard only answers pages served from
+http://127.0.0.1:8765 itself: another website open in your browser cannot talk to it.
 
 Weekly rhythm: open the dashboard, click **Refresh Announcements** (the instructor's baseline
 spreadsheet comes down as an attachment there), fetch the current section, draft, adjust, paste.
@@ -100,8 +106,10 @@ for the item that came out empty and the parser gets a one-line fix. There is a
 fake Moodle in `tests/` the whole thing is tested against before it ships.
 
 ```bash
-uv run --with pytest --with playwright==1.63.0 --with beautifulsoup4 --with markdownify --with pyyaml python -m pytest -q tests
+uv run --with pytest --with httpx --with-requirements requirements.txt python -m pytest -q tests
 ```
+
+(First time only, the browser the fetch tests use: `uv run --with playwright==1.63.0 python -m playwright install chromium`.)
 
 ## CAC notes
 

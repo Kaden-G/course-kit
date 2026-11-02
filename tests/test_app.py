@@ -57,7 +57,7 @@ def kit(tmp_path, monkeypatch):
         calls.append(user)
         return f"DRAFT #{len(calls)}"
     monkeypatch.setattr(llm, "chat", fake_chat)
-    return TestClient(appmod.app), root, calls
+    return TestClient(appmod.app, base_url="http://127.0.0.1:8765"), root, calls
 
 
 def test_home_and_module(kit):
@@ -66,12 +66,14 @@ def test_home_and_module(kit):
     r = c.get("/module/7/9001"); assert r.status_code == 200
     assert "Jane Classmate" in r.text and "Lesson 16 Reading" in r.text and "Wargame turn" in r.text
     assert "baseline_wk7.xlsx" in r.text
-    assert '<option value="Prof Smith"' not in r.text and '<option value="Jane Classmate"' in r.text   # classmates only
-    assert '<option value="Luis Student"' not in r.text                                                 # not himself
+    assert "Prof Smith —" not in r.text and '<option value="1">Jane Classmate —' in r.text   # classmates only, by post
+    assert "Luis Student —" not in r.text                                                     # not himself
     r = c.get("/settings"); assert '<option value="Luis Student" selected' in r.text and "1 of your posts" in r.text
     r = c.get("/"); assert "Refresh Announcements" in r.text and "baseline_wk7.xlsx" in r.text
     r = c.get("/module/7/9005"); assert r.status_code == 200 and "Jane Classmate" in r.text   # duplicate forum resolved
     assert "Lesson 15 Reading" in r.text and "Module 17" not in r.text
+    r = c.get("/module/0/100"); assert r.status_code == 200 and "Use the attached corrected sheet" in r.text   # a forum listed directly in a section is its own module
+    assert 'value="discussion" class="ghost" style="margin:4px 4px 4px 0" title="A complete initial discussion post, ready to paste."' in r.text   # ...and the post button is live
 
 
 def test_draft_adjust_revert_approve(kit):
@@ -108,6 +110,9 @@ def test_reply_and_wargame_cards(kit):
     c, root, calls = kit
     c.post("/draft", data={"section": 7, "cmid": 9001, "card": "reply", "classmate": "Jane Classmate"}, follow_redirects=False)
     assert "COA 2 wins on tempo" in calls[0] and "Jane Classmate" in calls[0]
+    r = c.post("/draft", data={"section": 7, "cmid": 9001, "card": "reply", "post": "1"}, follow_redirects=False)   # the module page sends the index
+    assert r.status_code == 303 and "COA 2 wins on tempo" in calls[1]
+    calls.pop()
     c.post("/draft", data={"section": 7, "cmid": 9001, "card": "wargame"}, follow_redirects=False)
     w = calls[1]
     assert "INSTRUCTOR BASELINE" in w and "SHEET Baseline" in w and "B1=1" in w     # announcements attachment first
@@ -122,9 +127,20 @@ def test_settings_roundtrip(kit):
                                   "course_url": "", "student_name": "Luis Student", "about": "Capt, 0302", "voice": "v", "rubric": "r"}, follow_redirects=False)
     assert r.status_code == 303
     cfg = appmod.load_cfg()
-    assert cfg["model"]["provider"] == "openai" and cfg["model"]["api_key"] == "k"   # blank key keeps the saved one
-    assert cfg["model"]["name"] == "gpt-5-mini" and cfg["length"] == "300 words"
+    assert cfg["model"]["provider"] == "openai" and cfg["model"]["name"] == "gpt-5-mini" and cfg["length"] == "300 words"
+    assert cfg["model"]["keys"] == {"gemini": "k"}                       # the old key stays with the provider it was for
+    assert llm.resolve(cfg["model"])["api_key"] == ""                    # ...and is not sent to openai
+    assert "No AI key yet" in c.get("/").text
     assert (root / "profile" / "about.md").read_text() == "Capt, 0302"
+    c.post("/settings", data={"provider": "openai", "api_key": "o", "name": "", "base_url": "", "length": "", "course_url": "",
+                              "student_name": "", "about": "", "voice": "", "rubric": ""}, follow_redirects=False)
+    c.post("/settings", data={"provider": "gemini", "api_key": "", "name": "", "base_url": "", "length": "", "course_url": "",
+                              "student_name": "", "about": "", "voice": "", "rubric": ""}, follow_redirects=False)
+    cfg = appmod.load_cfg()
+    assert cfg["model"]["keys"] == {"gemini": "k", "openai": "o"} and llm.resolve(cfg["model"])["api_key"] == "k"   # switching back restores
+    c.post("/settings", data={"provider": "gemini", "api_key": "", "clear_key": "1", "name": "", "base_url": "", "length": "",
+                              "course_url": "", "student_name": "", "about": "", "voice": "", "rubric": ""}, follow_redirects=False)
+    assert appmod.load_cfg()["model"]["keys"] == {"openai": "o"}
     assert c.get("/settings").status_code == 200
 
 
@@ -175,7 +191,7 @@ def test_error_page_and_bad_manifest(kit, monkeypatch):
     r = c.get("/"); assert r.status_code == 200 and "manifest.json could not be read" in r.text
     def boom(*a, **k): raise RuntimeError("kaboom")
     monkeypatch.setattr(appmod, "list_drafts", boom)
-    c2 = TestClient(appmod.app, raise_server_exceptions=False)
+    c2 = TestClient(appmod.app, raise_server_exceptions=False, base_url="http://127.0.0.1:8765")
     r = c2.get("/"); assert r.status_code == 500 and "kaboom" in r.text and "screenshot" in r.text
     assert llm.resolve(None)["provider"] == "gemini"
 
@@ -184,3 +200,115 @@ def test_kit_info_endpoint(kit):
     c, root, _ = kit
     j = c.get("/__kit").json()
     assert j["root"] == str(root) and j["version"] == appmod.kit_version()
+
+
+def test_adjust_sends_source_material(kit):
+    """'Add a citation' must see the readings, or the model invents one."""
+    c, root, calls = kit
+    r = c.post("/draft", data={"section": 7, "cmid": 9001, "card": "discussion"}, follow_redirects=False)
+    did = r.headers["location"].split("/")[-1]
+    c.post(f"/draft/{did}/adjust", data={"chip": "cite", "text": "DRAFT #1"})
+    assert "Planning is a continuous process" in calls[1] and "Compare COAs" in calls[1] and "DRAFT #1" in calls[1]
+    assert "IPB chapter" not in calls[1]
+    r = c.post("/draft", data={"section": 7, "cmid": 9001, "card": "reply", "post": "1"}, follow_redirects=False)
+    did2 = r.headers["location"].split("/")[-1]
+    c.post(f"/draft/{did2}/adjust", data={"instruction": "tighten it", "text": ""})
+    assert "COA 2 wins on tempo" in calls[-1] and "=== CLASSMATE ===" in calls[-1]
+
+
+def test_save_edits_without_ai_and_delete(kit):
+    c, root, calls = kit
+    r = c.post("/draft", data={"section": 7, "cmid": 9001, "card": "study_guide"}, follow_redirects=False)
+    did = r.headers["location"].split("/")[-1]
+    c.post(f"/draft/{did}/adjust", data={"text": "my own words"})          # the Save my edits button
+    d = appmod.load_draft(did)
+    assert len(calls) == 1 and d["versions"][-1] == {**d["versions"][-1], "text": "my own words", "note": "edited by hand"}
+    r = c.get("/drafts"); assert r.status_code == 200 and "Quiz study guide" in r.text
+    r = c.post(f"/draft/{did}/delete", follow_redirects=False)
+    assert r.status_code == 303 and not (root / "drafts" / f"{did}.json").exists()
+    assert c.get(f"/draft/{did}").status_code == 404
+    assert c.post(f"/draft/{did}/adjust", data={"chip": "shorter"}).status_code == 404
+    assert c.get("/draft/../etc/passwd").status_code in (404, 400)
+
+
+def test_bad_input_gives_404_not_500(kit):
+    c, root, _ = kit
+    assert c.post("/draft", data={"section": 7, "cmid": 424242, "card": "discussion"}).status_code == 404
+    assert c.post("/draft", data={"section": 7, "cmid": 9001, "card": "../../etc"}).status_code == 404
+    assert c.post("/draft", data={"section": 7, "cmid": 9001, "card": "reply"}).status_code == 404   # no classmate chosen
+    assert c.get("/module/7/424242").status_code == 404
+    r = c.post("/fetch", data={"section": "seven"}, follow_redirects=False)
+    assert r.status_code == 303 and "must%20be%20a%20number" in r.headers["location"]
+    assert "must be a number" in c.get(r.headers["location"]).text
+
+
+def test_unreadable_draft_is_skipped(kit):
+    c, root, _ = kit
+    (root / "drafts" / "zzzz.json").write_text("{not json")
+    assert c.get("/").status_code == 200 and c.get("/drafts").status_code == 200
+    assert c.get("/draft/zzzz").status_code == 500
+
+
+def test_other_websites_cannot_post(kit):
+    """A page in another tab must not be able to change settings, spend API credit, or kill the app."""
+    c, root, _ = kit
+    bad = {"Origin": "https://evil.example"}
+    assert c.post("/settings", data={"provider": "openai"}, headers=bad).status_code == 403
+    assert c.post("/__quit", headers=bad).status_code == 403
+    assert c.post("/draft", data={"section": 7, "cmid": 9001, "card": "discussion"}, headers={"Sec-Fetch-Site": "cross-site"}).status_code == 403
+    assert c.post("/fetch", data={"section": ""}, headers={"Origin": "http://127.0.0.1:8765", "Sec-Fetch-Site": "same-origin"}, follow_redirects=False).status_code == 303
+    assert c.get("/", headers={"Host": "some.other.host"}).status_code == 421
+    assert c.get("/", headers={"Host": "localhost:8765"}).status_code == 200
+
+
+def test_manifest_errors_shown(kit):
+    c, root, _ = kit
+    man = json.loads((root / "course" / "manifest.json").read_text())
+    man["errors"] = ["book Lesson 9: Timeout"]
+    (root / "course" / "manifest.json").write_text(json.dumps(man))
+    r = c.get("/"); assert "could not be fetched last time" in r.text and "Lesson 9" in r.text
+
+
+def test_llm_client_shapes(monkeypatch):
+    import io, urllib.error, urllib.request
+    sent = {}
+    class R(io.BytesIO):
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+    def fake_open(req, timeout=0):
+        sent["url"] = req.full_url; sent["body"] = json.loads(req.data); sent["auth"] = req.get_header("Authorization")
+        return R(json.dumps({"choices": [{"message": {"content": "```\nHello there\n```"}}]}).encode())
+    monkeypatch.setattr(urllib.request, "urlopen", fake_open)
+    out = llm.chat({"provider": "anthropic", "keys": {"anthropic": "sk-a", "gemini": "g"}}, "sys", "hi")
+    assert out == "Hello there"                                             # code fence unwrapped
+    assert sent["url"] == "https://api.anthropic.com/v1/chat/completions" and sent["auth"] == "Bearer sk-a"
+    assert "temperature" not in sent["body"] and sent["body"]["model"] == "claude-sonnet-5-5"
+    def denied(req, timeout=0):
+        raise urllib.error.HTTPError(req.full_url, 401, "nope", {}, io.BytesIO(b'{"error": {"message": "invalid x-api-key"}}'))
+    monkeypatch.setattr(urllib.request, "urlopen", denied)
+    with pytest.raises(llm.LLMError, match="invalid x-api-key.*paste it again"):
+        llm.chat({"provider": "openai", "api_key": "k"}, "s", "u")
+    with pytest.raises(llm.LLMError, match="No API key saved for openai"):
+        llm.chat({"provider": "openai", "keys": {"gemini": "g"}}, "s", "u")
+    assert llm.resolve({"provider": "openai", "api_key": "old"})["api_key"] == "old"      # pre-keys config still works
+
+
+def test_crlf_from_browser_is_not_a_hand_edit(kit):
+    c, root, calls = kit
+    calls_text = "Line one.\n\nLine two."
+    import llm as _llm
+    def chat(model_cfg, system, user, **k): return calls_text
+    import pytest as _pt
+    mp = _pt.MonkeyPatch(); mp.setattr(_llm, "chat", chat)
+    try:
+        r = c.post("/draft", data={"section": 7, "cmid": 9001, "card": "discussion"}, follow_redirects=False)
+        did = r.headers["location"].split("/")[-1]
+        c.post(f"/draft/{did}/adjust", data={"chip": "shorter", "text": "Line one.\r\n\r\nLine two."})   # what a browser sends back
+        notes = [v["note"] for v in appmod.load_draft(did)["versions"]]
+        assert notes == ["first draft", "Cut it by about a third. Keep the citations and the main argument."]
+        c.post(f"/draft/{did}/approve", data={"text": "Line one.\r\n\r\nLine two."})
+        d = appmod.load_draft(did)
+        assert [v["note"] for v in d["versions"]] == notes and d["status"] == "approved"
+        assert (root / "course" / d["outbox"]).read_text() == "Line one.\n\nLine two."
+    finally:
+        mp.undo()

@@ -18,9 +18,9 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import re
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -73,7 +73,14 @@ class Fetcher:
             log(f"launched system browser channel={channel}")
         except Exception as e:  # system Chrome missing -> bundled Chromium (CAC may not work there)
             log(f"could not launch channel={channel} ({e.__class__.__name__}); falling back to bundled chromium")
-            self.ctx = pw.chromium.launch_persistent_context(**kwargs)
+            try:
+                self.ctx = pw.chromium.launch_persistent_context(**kwargs)
+            except Exception as e2:
+                if "install" not in str(e2).lower() and "executable" not in str(e2).lower():
+                    raise
+                log("bundled chromium is not installed yet; downloading it (one time, about 150 MB)...")
+                subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=False)
+                self.ctx = pw.chromium.launch_persistent_context(**kwargs)
         self.page = self.ctx.pages[0] if self.ctx.pages else self.ctx.new_page()
 
     @staticmethod
@@ -166,8 +173,9 @@ class Fetcher:
         dest = dest_dir / name
         if dest.exists() and not self.force:
             return dest
-        dest.write_bytes(resp.body())
-        log(f"  saved {dest.relative_to(self.out)} ({len(resp.body())//1024} KB)")
+        body = resp.body()
+        dest.write_bytes(body)
+        log(f"  saved {dest.relative_to(self.out)} ({len(body)//1024} KB)")
         return dest
 
     def download_via_browser(self, url: str, dest_dir: Path) -> Path | None:
@@ -506,24 +514,39 @@ def main():
     cfg_path = Path(a.config)
     if not cfg_path.exists() and cfg_path.with_name("config.example.yaml").exists():
         cfg_path.write_text(cfg_path.with_name("config.example.yaml").read_text())
-    cfg = yaml.safe_load(cfg_path.read_text())
+    if not cfg_path.exists():
+        raise SystemExit(f"No {cfg_path} found. Run this from the Course Kit folder, or open Course Kit.command once.")
+    cfg = yaml.safe_load(cfg_path.read_text()) or {}
+    if not cfg.get("course_url") and not (cfg.get("base_url") and cfg.get("course_id")):
+        raise SystemExit("config.yaml has no course_url. Paste any link from inside the course into it "
+                         "(or into Settings in the dashboard) and try again.")
     f = Fetcher(cfg, force=a.force)
-    with sync_playwright() as pw:
-        f.start(pw)
-        try:
-            if a.interactive:
-                f.run(None, tree_only=True)
-                while True:
-                    ans = input("\nSection number to fetch (blank = whole course, q = quit): ").strip().lower()
-                    if ans == "q":
-                        break
-                    sec = int(ans) if ans.isdigit() else None
-                    f.run(sec, tree_only=False, quiet=True)
-                    print("\nDone with that one. The browser stays open so you won't need to log in again.")
-            else:
-                f.run(a.section, a.tree)
-        finally:
-            f.ctx.close()
+    try:
+        with sync_playwright() as pw:
+            f.start(pw)
+            try:
+                if a.interactive:
+                    f.run(None, tree_only=True)
+                    while True:
+                        ans = input("\nSection number to fetch (blank = whole course, q = quit): ").strip().lower()
+                        if ans in ("q", "quit", "exit"):
+                            break
+                        if ans and not ans.isdigit():
+                            print("Type a section number from the list above, blank for everything, or q to quit.")
+                            continue
+                        sec = int(ans) if ans else None
+                        f.run(sec, tree_only=False, quiet=True)
+                        print("\nDone with that one. The browser stays open so you won't need to log in again.")
+                else:
+                    f.run(a.section, a.tree)
+            finally:
+                try:
+                    f.ctx.close()
+                except Exception:
+                    pass   # the browser window was already closed by hand
+    except (KeyboardInterrupt, EOFError):
+        print("\nStopped. Anything already saved is in the course folder; run again to continue.")
+        sys.exit(130)
 
 
 if __name__ == "__main__":

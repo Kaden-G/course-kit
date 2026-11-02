@@ -4,20 +4,24 @@
 {% if d.outbox %}<div class="notice ok">Approved and saved to <code>course/{{ d.outbox }}</code>. Use Copy, then paste into Moodle.</div>{% endif %}
 <div class="card">
   <form method="post" action="/draft/{{ d.id }}/adjust" id="f" data-busy>
-    <textarea name="text" class="draft" id="text">{{ latest.text }}</textarea>
-    <p class="muted" style="margin:6px 0 10px">Version {{ d.versions|length }} · {{ latest.note }} · {{ latest.ts }} · <span id="count"></span></p>
+    <textarea name="text" class="draft" id="text" spellcheck="true">{{ latest.text }}</textarea>
+    <p class="muted" style="margin:6px 0 10px">Version {{ d.versions|length }} · {{ latest.note }} · {{ latest.ts }} · <span id="count"></span> <span id="dirty" class="tag warn" style="display:none">unsaved edits</span></p>
     <div class="row" style="margin-bottom:10px">
-      {% for key, label, _ in chips %}<button type="submit" name="chip" value="{{ key }}" class="chip">{{ label }}</button>{% endfor %}
+      {% for key, label, help in chips %}<button type="submit" name="chip" value="{{ key }}" class="chip" title="{{ help }}">{{ label }}</button>{% endfor %}
     </div>
     <div class="row">
       <input type="text" name="instruction" placeholder="Or tell it what to change: 'make paragraph two about logistics', 'drop the last sentence'..." style="flex:1;min-width:260px">
-      <button type="submit" class="ghost">Apply</button><span class="spinner">Working...</span>
+      <button type="submit" class="ghost">Apply</button>
+      <button type="submit" class="chip" id="save" title="Keep your own edits as a new version without asking the AI">Save my edits</button>
+      <span class="spinner">Working, usually 20 to 60 seconds...</span>
     </div>
   </form>
   <div class="row" style="margin-top:16px;border-top:1px solid var(--line);padding-top:14px">
     <button type="button" id="copy">Copy to clipboard</button>
     <button type="button" class="ghost" id="approve">Approve and save</button>
     <span class="muted" id="copied"></span>
+    <span style="flex:1"></span>
+    <form method="post" action="/draft/{{ d.id }}/delete" onsubmit="return confirm('Delete this draft and all its versions?')"><button type="submit" class="danger">Delete draft</button></form>
   </div>
   <form method="post" action="/draft/{{ d.id }}/approve" id="approveForm" style="display:none"><input type="hidden" name="text" id="approveText"></form>
 </div>
@@ -25,8 +29,12 @@
 {% for v in d.versions[:-1] %}<li><form method="post" action="/draft/{{ d.id }}/revert" class="row"><input type="hidden" name="version" value="{{ loop.index0 }}"><span>v{{ loop.index }} · {{ v.note }} · {{ v.ts }}</span><button type="submit" class="chip">Restore</button></form>
 <details><summary class="muted">show</summary><div style="white-space:pre-wrap;padding:8px 0">{{ v.text }}</div></details></li>{% endfor %}</ul></div>{% endif %}
 {% endblock %}{% block script %}<script>
-const ta=document.getElementById('text'),cnt=document.getElementById('count');
-function count(){cnt.textContent=ta.value.trim().split(/\s+/).filter(Boolean).length+' words'}count();ta.addEventListener('input',count);
-document.getElementById('copy').onclick=async()=>{await navigator.clipboard.writeText(ta.value);document.getElementById('copied').textContent='Copied.'};
-document.getElementById('approve').onclick=()=>{document.getElementById('approveText').value=ta.value;document.getElementById('approveForm').submit()};
+const ta=document.getElementById('text'),cnt=document.getElementById('count'),dirty=document.getElementById('dirty'),orig=ta.value;let leaving=false;
+function count(){cnt.textContent=ta.value.trim().split(/\s+/).filter(Boolean).length+' words';dirty.style.display=ta.value!==orig?'inline-block':'none'}count();ta.addEventListener('input',count);
+document.querySelectorAll('form').forEach(f=>f.addEventListener('submit',()=>{leaving=true}));
+window.addEventListener('beforeunload',e=>{if(ta.value!==orig&&!leaving){e.preventDefault();e.returnValue=''}});
+document.getElementById('copy').onclick=async()=>{const out=document.getElementById('copied');
+  try{await navigator.clipboard.writeText(ta.value);out.textContent='Copied.'}
+  catch(e){ta.focus();ta.select();out.textContent=document.execCommand('copy')?'Copied.':'Could not copy: select the text and press Cmd+C.'}};
+document.getElementById('approve').onclick=()=>{leaving=true;document.getElementById('approveText').value=ta.value;document.getElementById('approveForm').submit()};
 </script>{% endblock %}

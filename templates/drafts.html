@@ -1,0 +1,13 @@
+{% extends "base.html" %}{% block title %}Drafts{% endblock %}{% block body %}
+<h1>All drafts</h1>
+<div class="card">
+{% if drafts %}<ul class="plain">{% for d in drafts %}<li class="row" style="justify-content:space-between">
+  <span><a href="/draft/{{ d.id }}">{{ d.title }}</a>{% if d.classmate %} to {{ d.classmate }}{% endif %}
+    <span class="tag {{ 'ok' if d.status == 'approved' else '' }}">{{ d.status }}</span><br>
+    <span class="muted">[{{ '%02d' % (d.section or 0) }}] {{ d.module[:70] }} · {{ d.versions|length }} version{{ 's' if d.versions|length != 1 }} · {{ d.updated }}</span></span>
+  <form method="post" action="/draft/{{ d.id }}/delete" onsubmit="return confirm('Delete this draft and all its versions?')"><button type="submit" class="chip">Delete</button></form>
+</li>{% endfor %}</ul>
+{% else %}<p class="muted">No drafts yet. Open a module from the <a href="/">course page</a> and pick what to draft.</p>{% endif %}
+</div>
+<p class="muted">Approved drafts also live as files under each section's <code>outbox/</code> folder; deleting here does not remove those.</p>
+{% endblock %}

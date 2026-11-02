@@ -7,28 +7,31 @@
 <div class="card">
   <h2>AI model</h2>
   <label>Provider</label>
-  <select name="provider" id="provider">{% for k in presets %}<option value="{{ k }}" {% if k == resolved.provider %}selected{% endif %}>{{ k }}</option>{% endfor %}</select>
-  <label>API key <small>{% if model.api_key %}(one is saved; paste to replace){% else %}(get one: <span id="keyurl"></span>){% endif %}</small></label>
-  <input type="password" name="api_key" placeholder="paste key">
+  <select name="provider" id="provider">{% for k, p in presets.items() %}<option value="{{ k }}" {% if k == resolved.provider %}selected{% endif %}>{{ p.label }}</option>{% endfor %}</select>
+  <label>API key <small id="keystatus"></small></label>
+  <input type="password" name="api_key" placeholder="paste key" autocomplete="off">
+  <label class="inline" id="clearrow" style="display:none"><input type="checkbox" name="clear_key" value="1"> Forget the saved key for this provider</label>
   <label>Model name <small>(blank = the provider's default)</small></label>
   <input type="text" name="name" value="{{ model.name or '' }}" placeholder="{{ resolved.name }}">
   <label>Base URL <small>(only for custom / local servers)</small></label>
   <input type="text" name="base_url" value="{{ model.base_url or '' }}">
   <div class="row" style="margin-top:12px"><button type="submit" name="then_test" value="1" class="ghost">Save and test connection</button><span class="muted" id="testout"></span></div>
-  <p class="muted" style="margin-top:12px">Keys are stored in <code>config.yaml</code> on this computer only.</p>
+  <p class="muted" style="margin-top:12px">Keys are stored in <code>config.yaml</code> on this computer only, one per provider, so you can switch providers without re-pasting.</p>
 </div>
 <div class="card">
   <h2>Course and drafts</h2>
   <label>Course link <small>(any page inside the course)</small></label>
-  <input type="text" name="course_url" value="{{ cfg.course_url or '' }}">
+  <input type="text" name="course_url" value="{{ cfg.course_url or '' }}" placeholder="https://.../moodle/course/view.php?id=...">
   <label>Your name as it appears in the forums <small>(your own posts then become the voice samples, and you're left out of the reply list)</small></label>
-  {% if authors %}<select name="student_name"><option value="">— pick —</option>{% for a in authors %}<option value="{{ a }}" {% if a == cfg.student_name %}selected{% endif %}>{{ a }}</option>{% endfor %}</select>
+  {% if authors %}<select name="student_name"><option value="">— pick —</option>
+    {% if cfg.student_name and cfg.student_name not in authors %}<option value="{{ cfg.student_name }}" selected>{{ cfg.student_name }} (not seen in the fetched forums yet)</option>{% endif %}
+    {% for a in authors %}<option value="{{ a }}" {% if a == cfg.student_name %}selected{% endif %}>{{ a }}</option>{% endfor %}</select>
   {% if cfg.student_name %}<p class="muted" style="margin:4px 0 0">{{ own_count }} of your posts found in the fetched forums.</p>{% endif %}
   {% else %}<input type="text" name="student_name" value="{{ cfg.student_name or '' }}" placeholder="fetch a section with forums first">{% endif %}
   <label>Update source <small>(GitHub repo, owner/name)</small></label>
   <input type="text" name="update_repo" value="{{ (cfg.update or {}).repo or '' }}" placeholder="Kaden-G/course-kit">
-  <label>Update token <small>{% if (cfg.update or {}).token %}(one is saved; paste to replace){% else %}(read-only GitHub token Kaden gives you){% endif %}</small></label>
-  <input type="password" name="update_token" placeholder="github_pat_...">
+  <label>Update token <small>{% if (cfg.update or {}).token %}(one is saved; paste to replace){% else %}(read-only GitHub token Kaden gives you; blank is fine for a public repo){% endif %}</small></label>
+  <input type="password" name="update_token" placeholder="github_pat_..." autocomplete="off">
   <label>Default post length</label>
   <input type="text" name="length" value="{{ cfg.length or '250-350 words' }}">
   <label>About me <small>(rank, billet, experience the posts may draw on)</small></label>
@@ -44,9 +47,14 @@
 </div>
 </form>
 {% endblock %}{% block script %}<script>
-const urls={{ presets|tojson }};const sel=document.getElementById('provider'),ku=document.getElementById('keyurl');
-function ku_(){if(ku){const u=urls[sel.value].key_url;ku.innerHTML=u?('<a href="'+u+'" target="_blank">'+u+'</a>'):'not needed'}}ku_();sel.onchange=ku_;
+const presets={{ presets|tojson }},saved={{ saved_keys|tojson }};const sel=document.getElementById('provider'),ks=document.getElementById('keystatus'),cr=document.getElementById('clearrow');
+function status(){const p=sel.value,u=presets[p].key_url;
+ if(p==='custom'){ks.textContent='(usually not needed for a local server)';cr.style.display='none';return}
+ if(saved.includes(p)){ks.textContent='(one is saved for this provider; paste to replace)';cr.style.display='inline-flex'}
+ else{ks.innerHTML='(none saved for this provider yet; get one: '+(u?'<a href="'+u+'" target="_blank" rel="noopener">'+u+'</a>':'')+')';cr.style.display='none'}}
+status();sel.onchange=status;
 async function runTest(){const o=document.getElementById('testout');o.textContent='Saved. Testing the connection...';
- const r=await fetch('/settings/test',{method:'POST'});const j=await r.json();o.textContent=j.ok?('Connected. The model replied: '+j.reply):('Failed: '+j.error)}
+ try{const r=await fetch('/settings/test',{method:'POST'});const j=await r.json();o.textContent=j.ok?('Connected. The model replied: '+j.reply):('Failed: '+j.error)}
+ catch(e){o.textContent='Failed: '+e}}
 if(new URLSearchParams(location.search).get('test')==='1'){runTest()}
 </script>{% endblock %}

@@ -1,5 +1,11 @@
+# Everything both halves need. The .command launchers use uv and the inline metadata in app.py /
+# fetch_moodle.py instead; this file is for running the tests or a plain `pip install -r`.
 playwright==1.63.0
 beautifulsoup4
 markdownify
 pyyaml
 openpyxl
+fastapi
+uvicorn
+jinja2
+python-multipart

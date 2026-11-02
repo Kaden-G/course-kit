@@ -5,9 +5,9 @@
 <div class="card">
   <h2>What was fetched</h2>
   <ul class="plain">
-    {% for r in b.readings %}<li>{{ r.name }}<span class="tag">book</span></li>{% endfor %}
+    {% for r in b.readings %}<li>{{ r.name }}<span class="tag">book</span>{% if not r.md %} <span class="tag warn">text missing</span>{% endif %}</li>{% endfor %}
     {% for p in b.pages %}<li>{{ p.name }}<span class="tag">page</span></li>{% endfor %}
-    {% for f in b.forums %}<li>{{ f.name }}<span class="tag">forum</span> <span class="muted">{{ f.discussions or 0 }} threads, {{ posts|length }} posts</span></li>{% endfor %}
+    {% for f in b.forums %}<li>{{ f.name }}<span class="tag">forum</span> <span class="muted">{{ f.discussions or 0 }} thread{{ 's' if (f.discussions or 0) != 1 }}, {{ posts|length }} post{{ 's' if posts|length != 1 }}</span></li>{% endfor %}
     {% for q in b.quizzes %}<li>{{ q.name }}<span class="tag">quiz</span></li>{% endfor %}
     {% for f in b.files %}<li class="muted">file: {{ f.split('/')[-1] }}</li>{% endfor %}
     {% if not (b.readings or b.pages or b.forums or b.quizzes or b.files) %}<li class="muted">Only the module page itself. Linked items may live under another module (they are fetched once).</li>{% endif %}
@@ -18,21 +18,22 @@
   <form method="post" action="/draft" data-busy>
     <input type="hidden" name="section" value="{{ b.section.number }}"><input type="hidden" name="cmid" value="{{ b.module.cmid }}">
     {% for c in cards if c.name != 'reply' and (c.name != 'wargame' or has_xlsx) %}
-      <button type="submit" name="card" value="{{ c.name }}" class="ghost" style="margin:4px 4px 4px 0" {% if c.name == 'discussion' and not b.forums %}disabled title="No forum fetched for this module"{% endif %}>{{ c.meta.title }}</button>
+      {% set off = c.name == 'discussion' and not b.forums %}
+      <button type="submit" name="card" value="{{ c.name }}" class="ghost" style="margin:4px 4px 4px 0" title="{{ 'No forum fetched for this module' if off else (c.meta.output or '') }}" {% if off %}disabled{% endif %}>{{ c.meta.title }}</button>
     {% endfor %}
-    <span class="spinner">Drafting, 20 to 60 seconds...</span>
+    <span class="spinner">Drafting, usually 20 to 60 seconds...</span>
   </form>
   {% if baseline %}<p class="muted" style="margin:8px 0 0">Wargame baseline: <strong>{{ baseline }}</strong> (newest attachment in Announcements)</p>{% endif %}
   {% if classmates %}
   <h3>Reply to a classmate</h3>
   <form method="post" action="/draft" class="row" data-busy>
     <input type="hidden" name="section" value="{{ b.section.number }}"><input type="hidden" name="cmid" value="{{ b.module.cmid }}"><input type="hidden" name="card" value="reply">
-    <select name="classmate" style="max-width:420px">{% for p in classmates %}<option value="{{ p.author }}">{{ p.author }} — {{ p.body[:60] }}</option>{% endfor %}</select>
+    <select name="post" style="max-width:420px">{% for p in classmates %}<option value="{{ p.idx }}">{{ p.author }} — {{ p.body[:60] }}</option>{% endfor %}</select>
     <button type="submit">Draft reply</button><span class="spinner">Drafting...</span>
   </form>
-  {% endif %}
+  {% elif posts %}<p class="muted" style="margin-top:10px">No classmate posts yet, only the prompt. Fetch this section again after they post.</p>{% endif %}
 </div>
 </div>
 {% if drafts %}<div class="card"><h2>Drafts for this module</h2><ul class="plain">{% for d in drafts %}<li><a href="/draft/{{ d.id }}">{{ d.title }}</a>{% if d.classmate %} to {{ d.classmate }}{% endif %}<span class="tag {{ 'ok' if d.status == 'approved' else '' }}">{{ d.status }}</span> <span class="muted">{{ d.updated }}</span></li>{% endfor %}</ul></div>{% endif %}
-{% if posts %}<div class="card"><h2>Thread</h2>{% for p in posts %}<div style="padding:10px 0;border-top:1px solid var(--line)"><strong>{{ p.author }}</strong> <span class="muted">{{ p.time }}</span><br><span class="muted">{{ p.subject }}</span><div style="white-space:pre-wrap;margin-top:6px">{{ p.body[:1500] }}{% if p.body|length > 1500 %}…{% endif %}</div></div>{% endfor %}</div>{% endif %}
+{% if posts %}<div class="card"><h2>Thread</h2>{% for p in posts %}<div id="post-{{ loop.index0 }}" style="padding:10px 0;border-top:1px solid var(--line)"><strong>{{ p.author }}</strong> <span class="muted">{{ p.time }}</span><br><span class="muted">{{ p.subject }}</span><div style="white-space:pre-wrap;margin-top:6px">{{ p.body[:1500] }}{% if p.body|length > 1500 %}…{% endif %}</div></div>{% endfor %}</div>{% endif %}
 {% endblock %}
